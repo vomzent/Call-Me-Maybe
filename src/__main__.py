@@ -8,20 +8,25 @@ if __name__ == "__main__":
             data: list[dict[str, str]] = json.load(f)
             print(data)
             llm = Small_LLM_Model()
+            stop_token: int = llm.encode("<|im_end|>").tolist()[0][0]
             for entry in data:
-                print(entry["prompt"])
-                tokens: list[int] = llm.encode("<|im_start|>user\n"
-                                               f"{entry['prompt']}<|im_end|>"
+                print(entry["prompt"], end="\n\n")
+                tokens: list[int] = llm.encode("<|im_start|>system\n"
+                                               "Keep response short\n"
+                                               "<|im_start|>user\n"
+                                               f"{entry['prompt']}"
+                                               " /no_think<|im_end|>"
                                                "\n<|im_start|>assistant\n"
+                                               "<think>\n\n</think>\n"
                                                ).tolist()[0]
-                for _ in range(80):
+                highest = 0
+                while highest != stop_token:
                     logits = llm.get_logits_from_input_ids(tokens)
                     np_logits = np.array(logits)
                     highest = np.argmax(np_logits)
-                    print(highest)
                     print(llm.decode([highest]))
                     tokens.append(highest)
-                print(llm.decode(tokens))
+                print(llm.decode(tokens), "\n\n")
 
 
 
