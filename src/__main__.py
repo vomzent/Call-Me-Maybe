@@ -13,8 +13,8 @@ class FunctionCaller(BaseModel):
     function_definitions_file: str
     input_prompts_file: str
     output_file: str
-    _llm: Small_LLM_Model = PrivateAttr()
-    _prompts: list[str] = PrivateAttr(default=[])
+    _llm: Small_LLM_Model
+    _prompts: list[str] = []
     _func_prompt_start: list[int]
     _func_prompt_end: list[int]
     _stop_token: int
@@ -78,7 +78,7 @@ class FunctionCaller(BaseModel):
     @model_validator(mode='after')
     def output_file_validation(self) -> "FunctionCaller":
         try:
-            with open(self.function_definitions_file, "w") as f:
+            with open(self.output_file, "w") as f:
                 "file is openable"
                 "TODO: file format checking"
             return self
@@ -87,6 +87,7 @@ class FunctionCaller(BaseModel):
                                   f" {e}")
 
     def call_functions(self) -> bool:
+        ret = []
         try:
             for prompt in self._prompts:
                 prompt_tokens = self._llm.encode(prompt).tolist()[0]
@@ -100,10 +101,17 @@ class FunctionCaller(BaseModel):
                     np_logits = np.array(logits)
                     highest = np.argmax(np_logits)
                     ai_prompt.append(highest)
-                print(prompt)
-                print(self._llm.decode(ai_prompt))
+                call = {}
+                call["prompt"] = prompt
+                call["response"] = f"{self._llm.decode(ai_prompt)}"
+                ret.append(call)
+                # print(prompt)
+                # print(self._llm.decode(ai_prompt))
+            with open(self.output_file, "w") as f:
+                f.write(json.dumps(ret, indent=4))
             return True
-        except Exception:
+        except FileNotFoundError as e:
+            print(e)
             return False
 
 
@@ -111,7 +119,7 @@ if __name__ == "__main__":
     try:
         caller = FunctionCaller(function_definitions_file="test",
                                 input_prompts_file="data/input/function_calling_tests.json",
-                                output_file="test")
+                                output_file="data/output/function_calling_results.json")
         caller.call_functions()
     except FunctionCallerError as e:
         print(e)
