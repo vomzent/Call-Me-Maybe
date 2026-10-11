@@ -18,6 +18,7 @@ class FunctionCaller(BaseModel):
     output_file: str
     _llm: Small_LLM_Model
     _prompts: list[str] = []
+    _functions: list[dict[str, str | dict[str,str]]]
     _func_prompt_start: list[int]
     _func_prompt_end: list[int]
     _stop_token: int
@@ -45,39 +46,42 @@ class FunctionCaller(BaseModel):
     def _function_file_validation(self) -> None:
         try:
             with open(self.function_definitions_file, "r") as f:
-                "file is openable"
-                "TODO: file format checking"
+                data = json.load(f)
+                if not isinstance(data, list):
+                    raise(TypeError)
         except (FileNotFoundError, PermissionError, IsADirectoryError) as e:
             raise ValueError("Could not open function_definitions_file:"
                                   f" {e}")
 
-    def _input_prompt_validation(self) -> None:
+    def _initialize_prompts(self) -> None:
         try:
             with open(self.input_prompts_file, "r") as f:
                 data = json.load(f)
                 if not isinstance(data, list):
-                    raise TypeError
+                    raise TypeError("Prompts arent part of a list")
                 for prompt_dict in data:
                     if not isinstance(prompt_dict, dict):
-                        raise TypeError
+                        raise TypeError("Prompt not inside dictionary")
                     wrong_vals = ["Error" for k, v in prompt_dict.items()
                                   if k != "prompt" or not isinstance(v, str)]
                     if len(wrong_vals):
-                        raise TypeError
+                        raise ValueError("Invalid values inside "
+                                         f"input_prompts_file: {wrong_vals}")
                     self._prompts.append(prompt_dict["prompt"])
         except (FileNotFoundError, PermissionError, IsADirectoryError) as e:
             raise ValueError("Could not open input_prompts_file:"
                                   f" {e}")
-        except json.JSONDecodeError:
-            raise ValueError("Invalid JSON in input_prompts_file")
-        except TypeError:
-            raise ValueError("Wrongly formatted JSON in "
-                                  "input_prompts_file")
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON in input_prompts_file: {e}")
+        except TypeError as e:
+            raise ValueError(f"Wrongly formatted JSON in "
+                             f"input_prompts_file: {e}")
 
-    def _output_file_validation(self) -> None:
+    @staticmethod
+    def _output_file_validation(file: str) -> None:
         try:
-            makedirs(dirname(self.output_file), exist_ok=True)
-            with open(self.output_file, "w") as f:
+            makedirs(dirname(file), exist_ok=True)
+            with open(file, "w") as f:
                 "file is openable in write mode"
         except (PermissionError, IsADirectoryError) as e:
             raise ValueError("Could not open output_file:"
@@ -85,9 +89,9 @@ class FunctionCaller(BaseModel):
 
     @model_validator(mode="after")
     def valiate_model(self)-> "FunctionCaller":
-        self._input_prompt_validation()
+        self._initialize_prompts()
         self._function_file_validation()
-        self._output_file_validation()
+        self._output_file_validation(self.output_file)
         self._llm_name_validation()
         return self
 
@@ -165,6 +169,15 @@ if __name__ == "__main__":
         caller.call_functions()
     except FunctionCallerError as e:
         print(e)
+    except ValidationError as e:
+        errorlist = e.errors()
+        for errordict in errorlist:
+            try:
+                errorctx = errordict["ctx"]
+                error = errorctx["error"]
+            except KeyError:
+                error = errordict["msg"]
+            print(error)
     #     with open("data/input/function_calling_tests.json", "r") as f:
     #         data: list[dict[str, str]] = json.load(f)
     #         print(data)
