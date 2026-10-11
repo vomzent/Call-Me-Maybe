@@ -18,7 +18,7 @@ class FunctionCaller(BaseModel):
     output_file: str
     _llm: Small_LLM_Model
     _prompts: list[str] = []
-    _functions: list[dict[str, str | dict[str,str]]]
+    _functions: list[dict[str, str | dict[str,str]]] = []
     _func_prompt_start: list[int]
     _func_prompt_end: list[int]
     _stop_token: int
@@ -43,15 +43,65 @@ class FunctionCaller(BaseModel):
             raise ValueError("Invalid model name")
 
 
-    def _function_file_validation(self) -> None:
+    def _initialize_function_definitions(self) -> None:
         try:
             with open(self.function_definitions_file, "r") as f:
                 data = json.load(f)
                 if not isinstance(data, list):
-                    raise(TypeError)
+                    raise TypeError("Function definitions not part of list")
+                for func_dict in data:
+                    if not isinstance(func_dict, dict):
+                        raise TypeError("Function definition not inside "
+                                        f"dictionary {func_dict}")
+                    if len(func_dict) != 4:
+                        raise TypeError("Dictionary must contain only name,"
+                                        " description, parameters "
+                                        f"and returns: {func_dict}")
+                    try:
+                        if not isinstance(func_dict["name"], str):
+                            raise TypeError("function name is not a string: "
+                                            f"func_dict")
+                        if not isinstance(func_dict["description"], str):
+                            raise TypeError("Function description must be a "
+                                            f"string: {func_dict}")
+                        if not isinstance(func_dict["parameters"], dict):
+                            raise TypeError("Function parameters must be a "
+                                            f"dictionary: {func_dict}")
+                        for value in func_dict["parameters"].values():
+                            print(value)
+                            if not isinstance(value, dict):
+                                raise TypeError("Parameters must have a dict "
+                                                "containing type: "
+                                                f"{func_dict["parameters"]}")
+                            if len(value) != 1:
+                                raise TypeError("Parameters dictionary must "
+                                                "only contain type: "
+                                                f"{func_dict["parameters"]}")
+                            if not isinstance(value["type"], str):
+                                raise TypeError("Parameters type must be"
+                                                "in string format: "
+                                                f"{func_dict['parameters']}")
+                        if not isinstance(func_dict["returns"], dict):
+                            raise TypeError("returns must be a dictionary "
+                                            f"containing type: {func_dict}")
+                        if len(func_dict["returns"]) != 1:
+                            TypeError("returns dictionary must only contain "
+                                      f"type {func_dict['returns']}")
+                        if not isinstance(func_dict["returns"]["type"], str):
+                            raise TypeError("returns type must be in string "
+                                            f"format {func_dict['returns']}")
+                    except KeyError as e:
+                        raise TypeError(f"{func_dict} is missing key {e}")
+                    self._functions.append(func_dict)
         except (FileNotFoundError, PermissionError, IsADirectoryError) as e:
             raise ValueError("Could not open function_definitions_file:"
                                   f" {e}")
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON in function_definitions_file {e}")
+        except TypeError as e:
+            raise ValueError("Wrongly formatted JSON in "
+                             f"function_definitions_file: {e}")
+
 
     def _initialize_prompts(self) -> None:
         try:
@@ -61,7 +111,8 @@ class FunctionCaller(BaseModel):
                     raise TypeError("Prompts arent part of a list")
                 for prompt_dict in data:
                     if not isinstance(prompt_dict, dict):
-                        raise TypeError("Prompt not inside dictionary")
+                        raise TypeError("Prompt not inside dictionary:"
+                                        f" {prompt_dict}")
                     wrong_vals = ["Error" for k, v in prompt_dict.items()
                                   if k != "prompt" or not isinstance(v, str)]
                     if len(wrong_vals):
@@ -74,7 +125,7 @@ class FunctionCaller(BaseModel):
         except json.JSONDecodeError as e:
             raise ValueError(f"Invalid JSON in input_prompts_file: {e}")
         except TypeError as e:
-            raise ValueError(f"Wrongly formatted JSON in "
+            raise ValueError("Wrongly formatted JSON in "
                              f"input_prompts_file: {e}")
 
     @staticmethod
@@ -90,7 +141,7 @@ class FunctionCaller(BaseModel):
     @model_validator(mode="after")
     def valiate_model(self)-> "FunctionCaller":
         self._initialize_prompts()
-        self._function_file_validation()
+        self._initialize_function_definitions()
         self._output_file_validation(self.output_file)
         self._llm_name_validation()
         return self
@@ -127,7 +178,7 @@ class FunctionCaller(BaseModel):
 
 if __name__ == "__main__":
     args = sys.argv[1:]
-    func_file="test"
+    func_file="data/input/functions_definition.json"
     input_file="data/input/function_calling_tests.json"
     out_file="data/output/function_calling_results.json"
     try:
