@@ -29,3 +29,6 @@ https://qwen.readthedocs.io/en/latest/getting_started/concepts.html#chatml
 
 JSON usage from the python docs:<br>
 https://docs.python.org/3/library/json.html
+
+regex cheat sheet:<br>
+https://www.rexegg.com/regex-quickstart.php

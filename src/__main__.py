@@ -7,6 +7,7 @@ from os.path import dirname
 import sys
 import json
 import numpy as np
+import re
 
 class FunctionCallerError(Exception):
     pass
@@ -22,8 +23,10 @@ class FunctionCaller(BaseModel):
     _function_names: list[str] = []
     _fn_name_tokens: list[list[int]] = []
     _function_params: dict[str, dict[str,str]] = {}
-    _func_prompt_start: list[int]
-    _func_prompt_end: list[int]
+    _name_prompt: list[int]
+    _prompt_end: list[int]
+    _param_prompt1: list[int]
+    _param_prompt2: list[int]
     _stop_token: int
 
     model_config = ConfigDict(extra='forbid')
@@ -32,21 +35,19 @@ class FunctionCaller(BaseModel):
     def _llm_name_validation(self) -> None:
         try:
             self._llm = Small_LLM_Model(model_name=self.model_name)
-            self._func_prompt_start = self._llm.encode("<|im_start|>system\n"
-                                             "You are a function caller,"
-                                             " respond with only with "
-                                             "function name from these "
-                                             "availabe functions:\n"
-                                             f"{self._functions}<|im_end|>"
-                                             "<|im_start|>user\n"
-                                             ).tolist()[0]
-            # self._func_prompt_start = self._llm.encode("<|im_start|>system\n"
-            #                                            "You are chatcent\n"
-            #                                            ).tolist()[0]
-            self._func_prompt_end = self._llm.encode(" /no_think<|im_end|>"
-                                           "\n<|im_start|>assistant\n"
-                                           "<think>\n\n</think>\n"
-                                           ).tolist()[0]
+            p_name = ("<|im_start|>system\nYou are a function caller, respond"
+                      "only with function name from these availabe functions:"
+                      f"\n {self._functions}\n<|im_end|><|im_start|>user\n")
+            p_end = (" /no_think<|im_end|>\n<|im_start|>assistant\n<think>\n"
+                      "\n</think>\n")
+            self._name_prompt = self._llm.encode(p_name).tolist()[0]
+            self._prompt_end = self._llm.encode(p_end).tolist()[0]
+            param_s = ("<|im_start|>system\nYou are a function caller, given"
+                       " the function:\n")
+            param_e = ("\nrespond only with the right parameters to resolve "
+                        "the user's prompt\n<|im_end|><|im_start|>user\n")
+            self._param_prompt1 = self._llm.encode(param_s).tolist()[0]
+            self._param_prompt2 = self._llm.encode(param_e).tolist()[0]
             self._stop_token = self._llm.encode("<|im_end|>").tolist()[0][0]
             for nm in self._function_names:
                 self._fn_name_tokens.append(self._llm.encode(nm).tolist()[0])
@@ -161,12 +162,11 @@ class FunctionCaller(BaseModel):
 
     def _get_fn_name(self, prompt: str) -> str:
         prompt_tokens = self._llm.encode(prompt).tolist()[0]
-        user_prompt = (self._func_prompt_start + prompt_tokens +
-                       self._func_prompt_end)
+        full_prompt = (self._name_prompt + prompt_tokens +
+                       self._prompt_end)
         print(prompt)
         ai_prompt: list[int] = []
         highest = 0
-        full_prompt: list[int] = user_prompt + ai_prompt
         names: list[list[int]] = self._fn_name_tokens.copy()
         while len(names) > 1:
             for token in names[1:]:
@@ -194,10 +194,58 @@ class FunctionCaller(BaseModel):
 
     def _get_fn_params(self, prompt: str, name: str) -> dict[str, str]:
         ret = {}
+        func_str = f"{name}:{self._function_params[name]}"
+        func_tokens = self._llm.encode(func_str).tolist()[0]
+        string_tokens = self._llm.encode(prompt).tolist()[0]
+        full_prompt = (self._param_prompt1 + func_tokens + 
+                       self._param_prompt2 + string_tokens +
+                       self._prompt_end)
+        number_tokens = []
+        s_numbers = re.findall(r'-?\d*\.?\d+', prompt)
+        numbers: list[list[int]] = []
+        for nb in s_numbers:
+            numbers.append(self._llm.encode(nb).tolist()[0])
+        print(numbers)
+        print(self._llm.decode(string_tokens))
         for k, v in self._function_params[name].items():
-            print(k)
-            print(v)
-            ret[k] = v["type"]
+            ai_prompt = []
+            start = self._llm.encode(f"{k}: ").tolist()[0]
+            full_prompt += start
+            if v["type"] == "number":
+                nbs = numbers.copy()
+                while len(nbs) > 1:
+                    logits = self._llm.get_logits_from_input_ids(full_prompt)
+                    allowed = [l[0] for l in nbs]
+                    np_logits = np.array(logits)
+                    for i in range(len(logits)):
+                        if i not in allowed:
+                            np_logits[i] = -np.inf
+                    highest = np.argmax(np_logits)
+                    ai_prompt.append(highest)
+                    full_prompt.append(highest)
+                    nbs = [l[1:] for l in nbs 
+                           if len(l) > 1 and l[0] == highest]
+                if len(nbs):
+                    full_prompt += nbs[0]
+                    ai_prompt += nbs[0]
+                print(self._llm.decode(ai_prompt))
+                numbers.remove(ai_prompt)
+            else:
+                highest = 0
+                while highest != self._stop_token:
+                    logits = self._llm.get_logits_from_input_ids(full_prompt)
+                    np_logits = np.array(logits)
+                    for i in range(len(logits)):
+                        if i not in string_tokens and i != self._stop_token:
+                            np_logits[i] = -np.inf
+                    highest = np.argmax(np_logits)
+                    if highest != self._stop_token:
+                        ai_prompt.append(highest)
+                        full_prompt.append(highest)
+                        string_tokens.remove(highest)
+                        print(self._llm.decode(highest))
+            full_prompt += self._llm.encode(",\n").tolist()[0]
+            ret[k] = self._llm.decode(ai_prompt)
         return ret
 
 
