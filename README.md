@@ -19,5 +19,13 @@ It contains the Following targets:
 ## Resources
 My peers!!! Including but not limited to:
 - cpfister
+- ilclaass
+- ivan-der
 - maavan-d
 - odschreu
+
+prompt formatting from the qwen documentation:<br>
+https://qwen.readthedocs.io/en/latest/getting_started/concepts.html#chatml
+
+JSON usage from the python docs:<br>
+https://docs.python.org/3/library/json.html
