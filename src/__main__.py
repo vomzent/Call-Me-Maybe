@@ -37,9 +37,12 @@ class FunctionCaller(BaseModel):
                                              " respond with only with "
                                              "function name from these "
                                              "availabe functions:\n"
-                                             f"{self._functions}"
+                                             f"{self._functions}<|im_end|>"
                                              "<|im_start|>user\n"
                                              ).tolist()[0]
+            # self._func_prompt_start = self._llm.encode("<|im_start|>system\n"
+            #                                            "You are chatcent\n"
+            #                                            ).tolist()[0]
             self._func_prompt_end = self._llm.encode(" /no_think<|im_end|>"
                                            "\n<|im_start|>assistant\n"
                                            "<think>\n\n</think>\n"
@@ -170,7 +173,11 @@ class FunctionCaller(BaseModel):
                 if token[0] != names[0][0]:
                     print(ai_prompt)
                     logits = self._llm.get_logits_from_input_ids(full_prompt)
+                    allowed = [l[0] for l in names]
                     np_logits = np.array(logits)
+                    for i in range(len(np_logits)):
+                        if i not in allowed:
+                            np_logits[i] = -np.inf
                     highest = np.argmax(np_logits)
                     ai_prompt.append(highest)
                     full_prompt.append(highest)
@@ -181,7 +188,8 @@ class FunctionCaller(BaseModel):
                 ai_prompt.append(names[0][0])
                 full_prompt.append(names[0][0])
                 names = [l[1:] for l in names if len(l) > 1]
-        ai_prompt += names[0]
+        if len(names):
+            ai_prompt += names[0]
         return (self._llm.decode(ai_prompt))
 
     def _get_fn_params(self, prompt: str, name: str) -> dict[str, str]:
@@ -207,7 +215,7 @@ class FunctionCaller(BaseModel):
             with open(self.output_file, "w") as f:
                 _ = f.write(json.dumps(ret, indent=4))
             return True
-        except Exception as e:
+        except IsADirectoryError as e:
             raise FunctionCallerError(e)
 
 
