@@ -19,6 +19,8 @@ class FunctionCaller(BaseModel):
     _llm: Small_LLM_Model
     _prompts: list[str] = []
     _functions: list[dict[str, str | dict[str,str]]] = []
+    _function_names: list[str] = []
+    _function_params: dict[str, dict[str,str]] = {}
     _func_prompt_start: list[int]
     _func_prompt_end: list[int]
     _stop_token: int
@@ -30,7 +32,11 @@ class FunctionCaller(BaseModel):
         try:
             self._llm = Small_LLM_Model(model_name=self.model_name)
             self._func_prompt_start = self._llm.encode("<|im_start|>system\n"
-                                             "Keep response short\n"
+                                             "You are a function caller,"
+                                             " respond with only with "
+                                             "function name from these "
+                                             "availabe functions:\n"
+                                             f"{self._functions}"
                                              "<|im_start|>user\n"
                                              ).tolist()[0]
             self._func_prompt_end = self._llm.encode(" /no_think<|im_end|>"
@@ -49,50 +55,52 @@ class FunctionCaller(BaseModel):
                 data = json.load(f)
                 if not isinstance(data, list):
                     raise TypeError("Function definitions not part of list")
-                for func_dict in data:
-                    if not isinstance(func_dict, dict):
+                for fn in data:
+                    if not isinstance(fn, dict):
                         raise TypeError("Function definition not inside "
-                                        f"dictionary {func_dict}")
-                    if len(func_dict) != 4:
+                                        f"dictionary {fn}")
+                    if len(fn) != 4:
                         raise TypeError("Dictionary must contain only name,"
                                         " description, parameters "
-                                        f"and returns: {func_dict}")
+                                        f"and returns: {fn}")
                     try:
-                        if not isinstance(func_dict["name"], str):
+                        if not isinstance(fn["name"], str):
                             raise TypeError("function name is not a string: "
-                                            f"func_dict")
-                        if not isinstance(func_dict["description"], str):
+                                            f"fn")
+                        if not isinstance(fn["description"], str):
                             raise TypeError("Function description must be a "
-                                            f"string: {func_dict}")
-                        if not isinstance(func_dict["parameters"], dict):
+                                            f"string: {fn}")
+                        if not isinstance(fn["parameters"], dict):
                             raise TypeError("Function parameters must be a "
-                                            f"dictionary: {func_dict}")
-                        for value in func_dict["parameters"].values():
+                                            f"dictionary: {fn}")
+                        for value in fn["parameters"].values():
                             print(value)
                             if not isinstance(value, dict):
                                 raise TypeError("Parameters must have a dict "
                                                 "containing type: "
-                                                f"{func_dict["parameters"]}")
+                                                f"{fn["parameters"]}")
                             if len(value) != 1:
                                 raise TypeError("Parameters dictionary must "
                                                 "only contain type: "
-                                                f"{func_dict["parameters"]}")
+                                                f"{fn["parameters"]}")
                             if not isinstance(value["type"], str):
                                 raise TypeError("Parameters type must be"
                                                 "in string format: "
-                                                f"{func_dict['parameters']}")
-                        if not isinstance(func_dict["returns"], dict):
+                                                f"{fn['parameters']}")
+                        if not isinstance(fn["returns"], dict):
                             raise TypeError("returns must be a dictionary "
-                                            f"containing type: {func_dict}")
-                        if len(func_dict["returns"]) != 1:
+                                            f"containing type: {fn}")
+                        if len(fn["returns"]) != 1:
                             TypeError("returns dictionary must only contain "
-                                      f"type {func_dict['returns']}")
-                        if not isinstance(func_dict["returns"]["type"], str):
+                                      f"type {fn['returns']}")
+                        if not isinstance(fn["returns"]["type"], str):
                             raise TypeError("returns type must be in string "
-                                            f"format {func_dict['returns']}")
+                                            f"format {fn['returns']}")
                     except KeyError as e:
-                        raise TypeError(f"{func_dict} is missing key {e}")
-                    self._functions.append(func_dict)
+                        raise TypeError(f"{fn} is missing key {e}")
+                    self._functions.append(fn)
+                    self._function_names.append(fn["name"])
+                    self._function_params[fn["name"]] = fn["parameters"]
         except (FileNotFoundError, PermissionError, IsADirectoryError) as e:
             raise ValueError("Could not open function_definitions_file:"
                                   f" {e}")
@@ -146,34 +154,39 @@ class FunctionCaller(BaseModel):
         self._llm_name_validation()
         return self
 
+    def get_function_name_from_prompt(self, prompt: str) -> str:
+        prompt_tokens = self._llm.encode(prompt).tolist()[0]
+        user_prompt = (self._func_prompt_start + prompt_tokens +
+                       self._func_prompt_end)
+        print(prompt)
+        ai_prompt = []
+        highest = 0
+        full_prompt = user_prompt + ai_prompt
+        while highest != self._stop_token:
+            print(ai_prompt)
+            logits = self._llm.get_logits_from_input_ids(full_prompt)
+            np_logits = np.array(logits)
+            highest = np.argmax(np_logits)
+            ai_prompt.append(highest)
+            full_prompt.append(highest)
+        return (self._llm.decode(ai_prompt))
+
 
     def call_functions(self) -> bool:
         ret = []
         try:
             for prompt in self._prompts:
-                print(prompt)
-                prompt_tokens = self._llm.encode(prompt).tolist()[0]
-                user_prompt = (self._func_prompt_start + prompt_tokens +
-                               self._func_prompt_end)
-                ai_prompt = []
-                highest = 0
-                while highest != self._stop_token:
-                    full_prompt = user_prompt + ai_prompt
-                    logits = self._llm.get_logits_from_input_ids(full_prompt)
-                    np_logits = np.array(logits)
-                    highest = np.argmax(np_logits)
-                    ai_prompt.append(highest)
-                call = {}
-                call["prompt"] = prompt
-                call["response"] = f"{self._llm.decode(ai_prompt)}"
+                call = {
+                    "prompt" : prompt,
+                    "response": self.get_function_name_from_prompt(prompt)
+                }
                 ret.append(call)
                 print(call["response"])
             with open(self.output_file, "w") as f:
-                f.write(json.dumps(ret, indent=4))
+                _ = f.write(json.dumps(ret, indent=4))
             return True
-        except FileNotFoundError as e:
-            print(e)
-            return False
+        except Exception as e:
+            raise FunctionCallerError(e)
 
 
 if __name__ == "__main__":
