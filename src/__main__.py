@@ -156,14 +156,14 @@ class FunctionCaller(BaseModel):
         self._llm_name_validation()
         return self
 
-    def get_function_name_from_prompt(self, prompt: str) -> str:
+    def _get_fn_name(self, prompt: str) -> str:
         prompt_tokens = self._llm.encode(prompt).tolist()[0]
         user_prompt = (self._func_prompt_start + prompt_tokens +
                        self._func_prompt_end)
         print(prompt)
-        ai_prompt = []
+        ai_prompt: list[int] = []
         highest = 0
-        full_prompt = user_prompt + ai_prompt
+        full_prompt: list[int] = user_prompt + ai_prompt
         names: list[list[int]] = self._fn_name_tokens.copy()
         while len(names) > 1:
             for token in names[1:]:
@@ -184,6 +184,14 @@ class FunctionCaller(BaseModel):
         ai_prompt += names[0]
         return (self._llm.decode(ai_prompt))
 
+    def _get_fn_params(self, prompt: str, name: str) -> dict[str, str]:
+        ret = {}
+        for k, v in self._function_params[name].items():
+            print(k)
+            print(v)
+            ret[k] = v["type"]
+        return ret
+
 
     def call_functions(self) -> bool:
         ret = []
@@ -191,10 +199,11 @@ class FunctionCaller(BaseModel):
             for prompt in self._prompts:
                 call = {
                     "prompt" : prompt,
-                    "response": self.get_function_name_from_prompt(prompt)
+                    "name": self._get_fn_name(prompt)
                 }
+                call["parameters"] = self._get_fn_params(prompt, call["name"])
                 ret.append(call)
-                print(call["response"])
+                print(call["parameters"])
             with open(self.output_file, "w") as f:
                 _ = f.write(json.dumps(ret, indent=4))
             return True
