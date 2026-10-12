@@ -20,6 +20,7 @@ class FunctionCaller(BaseModel):
     _prompts: list[str] = []
     _functions: list[dict[str, str | dict[str,str]]] = []
     _function_names: list[str] = []
+    _fn_name_tokens: list[list[int]] = []
     _function_params: dict[str, dict[str,str]] = {}
     _func_prompt_start: list[int]
     _func_prompt_end: list[int]
@@ -44,6 +45,8 @@ class FunctionCaller(BaseModel):
                                            "<think>\n\n</think>\n"
                                            ).tolist()[0]
             self._stop_token = self._llm.encode("<|im_end|>").tolist()[0][0]
+            for nm in self._function_names:
+                self._fn_name_tokens.append(self._llm.encode(nm).tolist()[0])
         except OSError:
             "OSError has to be cought because llm_sdk devs were slacking"
             raise ValueError("Invalid model name")
@@ -110,7 +113,6 @@ class FunctionCaller(BaseModel):
             raise ValueError("Wrongly formatted JSON in "
                              f"function_definitions_file: {e}")
 
-
     def _initialize_prompts(self) -> None:
         try:
             with open(self.input_prompts_file, "r") as f:
@@ -162,13 +164,24 @@ class FunctionCaller(BaseModel):
         ai_prompt = []
         highest = 0
         full_prompt = user_prompt + ai_prompt
-        while highest != self._stop_token:
-            print(ai_prompt)
-            logits = self._llm.get_logits_from_input_ids(full_prompt)
-            np_logits = np.array(logits)
-            highest = np.argmax(np_logits)
-            ai_prompt.append(highest)
-            full_prompt.append(highest)
+        names: list[list[int]] = self._fn_name_tokens.copy()
+        while len(names) > 1:
+            for token in names[1:]:
+                if token[0] != names[0][0]:
+                    print(ai_prompt)
+                    logits = self._llm.get_logits_from_input_ids(full_prompt)
+                    np_logits = np.array(logits)
+                    highest = np.argmax(np_logits)
+                    ai_prompt.append(highest)
+                    full_prompt.append(highest)
+                    names = [l[1:] for l in names 
+                             if len(l) > 1 and l[0] == highest]
+                    break
+            else:
+                ai_prompt.append(names[0][0])
+                full_prompt.append(names[0][0])
+                names = [l[1:] for l in names if len(l) > 1]
+        ai_prompt += names[0]
         return (self._llm.decode(ai_prompt))
 
 
