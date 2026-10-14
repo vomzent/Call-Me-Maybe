@@ -160,37 +160,42 @@ class FunctionCaller(BaseModel):
         self._llm_name_validation()
         return self
 
-    def _get_fn_name(self, prompt: str) -> str:
-        prompt_tokens = self._llm.encode(prompt).tolist()[0]
-        full_prompt = (self._name_prompt + prompt_tokens +
-                       self._prompt_end)
-        print(prompt)
-        ai_prompt: list[int] = []
-        highest = 0
-        names: list[list[int]] = self._fn_name_tokens.copy()
-        while len(names) > 1:
-            for token in names[1:]:
-                if token[0] != names[0][0]:
-                    print(ai_prompt)
-                    logits = self._llm.get_logits_from_input_ids(full_prompt)
-                    allowed = [l[0] for l in names]
+    def _llm_pick_from_list(self, prompt: list[int],
+                            selection: list[list[int]]) -> list[int]:
+        ret: list[int] = []
+        while len(selection) > 1:
+            for token in selection[1:]:
+                if token[0] != selection[0][0]:
+                    print(ret)
+                    logits = self._llm.get_logits_from_input_ids(prompt)
+                    allowed = [l[0] for l in selection]
                     np_logits = np.array(logits)
                     for i in range(len(np_logits)):
                         if i not in allowed:
                             np_logits[i] = -np.inf
                     highest = np.argmax(np_logits)
-                    ai_prompt.append(highest)
-                    full_prompt.append(highest)
-                    names = [l[1:] for l in names 
-                             if len(l) > 1 and l[0] == highest]
+                    ret.append(highest)
+                    prompt.append(highest)
+                    selection = [l[1:] for l in selection
+                            if len(l) > 1 and l[0] == highest]
                     break
             else:
-                ai_prompt.append(names[0][0])
-                full_prompt.append(names[0][0])
-                names = [l[1:] for l in names if len(l) > 1]
-        if len(names):
-            ai_prompt += names[0]
-        return (self._llm.decode(ai_prompt))
+                ret.append(selection[0][0])
+                prompt.append(selection[0][0])
+                selection = [l[1:] for l in selection if len(l)]
+        if len(selection):
+            ret += selection[0]
+        return (ret)
+
+
+    def _get_fn_name(self, prompt: str) -> str:
+        prompt_tokens = self._llm.encode(prompt).tolist()[0]
+        full_prompt = (self._name_prompt + prompt_tokens +
+                       self._prompt_end)
+        print(prompt)
+        names: list[list[int]] = self._fn_name_tokens.copy()
+        pick = self._llm_pick_from_list(full_prompt, names)
+        return (self._llm.decode(pick))
 
     def _get_fn_params(self, prompt: str, name: str) -> dict[str, str]:
         ret = {}
@@ -200,7 +205,6 @@ class FunctionCaller(BaseModel):
         full_prompt = (self._param_prompt1 + func_tokens + 
                        self._param_prompt2 + string_tokens +
                        self._prompt_end)
-        number_tokens = []
         s_numbers = re.findall(r'-?\d*\.?\d+', prompt)
         numbers: list[list[int]] = []
         for nb in s_numbers:
@@ -213,23 +217,10 @@ class FunctionCaller(BaseModel):
             full_prompt += start
             if v["type"] == "number":
                 nbs = numbers.copy()
-                while len(nbs) > 1:
-                    logits = self._llm.get_logits_from_input_ids(full_prompt)
-                    allowed = [l[0] for l in nbs]
-                    np_logits = np.array(logits)
-                    for i in range(len(logits)):
-                        if i not in allowed:
-                            np_logits[i] = -np.inf
-                    highest = np.argmax(np_logits)
-                    ai_prompt.append(highest)
-                    full_prompt.append(highest)
-                    nbs = [l[1:] for l in nbs 
-                           if len(l) > 1 and l[0] == highest]
-                if len(nbs):
-                    full_prompt += nbs[0]
-                    ai_prompt += nbs[0]
-                print(self._llm.decode(ai_prompt))
+                ai_prompt = self._llm_pick_from_list(full_prompt, nbs)
+                print(self._llm.decode(full_prompt))
                 numbers.remove(ai_prompt)
+                ai_string = self._llm.decode(ai_prompt)
             else:
                 highest = 0
                 while highest != self._stop_token:
@@ -244,8 +235,11 @@ class FunctionCaller(BaseModel):
                         full_prompt.append(highest)
                         string_tokens.remove(highest)
                         print(self._llm.decode(highest))
+                ai_string = self._llm.decode(ai_prompt)
+                ai_string = ai_string.strip(" \'").rstrip("\'")
             full_prompt += self._llm.encode(",\n").tolist()[0]
-            ret[k] = self._llm.decode(ai_prompt)
+            ret[k] = ai_string
+        print(self._llm.decode(full_prompt))
         return ret
 
 
