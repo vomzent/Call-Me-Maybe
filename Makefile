@@ -7,7 +7,7 @@ run:
 debug:
 	uv run $(PY) -m pdb -m src
 clean:
-	rm -rf .mypy_cashe .venv llm_sdk/llm_sdk/__pycache__ src/__pycache__
+	rm -rf .mypy_cache .venv llm_sdk/llm_sdk/__pycache__ src/__pycache__
 lint:
 	uv run $(PY) -m flake8 src
 	uv run $(PY) -m mypy src \
@@ -19,3 +19,5 @@ lint:
 lint-strict:
 	uv run $(PY) -m flake8 src
 	uv run $(PY) -m mypy src --strict
+
+.PHONY: install run debug clean lint lint-strict
