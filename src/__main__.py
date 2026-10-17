@@ -11,10 +11,35 @@ import re
 
 
 class FunctionCallerError(Exception):
+    """Shows errors thrown by the FunctionCaller class
+
+    When the FunctionCaller class runs into an Exception, that exception
+    gets cought and the FunctionCaller raises a FunctionCallerError with the
+    approriate error message.
+
+    Attributes:
+        obj: The object to be cought using try/except (often a message)
+    """
     pass
 
 
 class FunctionCaller(BaseModel):
+    """Translates natural language requests into function calls
+
+    The FunctionCaller class takes in a Casual Language Model a function 
+    definitions file, input prompts file and an output file. Then Translates
+    each prompt into a function call that gets written to the output file in
+    JSON format.
+    
+    Attributes:
+        model_name: The name of the Language Model (has to support ChatML)
+        function_definitions_file: The file to read function definitons from
+        input_prompts_file: The file to read natural language requests from
+        output_file: The file to write the function calls to in JSON format
+    Raises:
+        ValidationError: If during instantiation a configuration error is made
+        FunctionCallerError: if during translation an exception occurs
+    """
     model_name: str = "Qwen/Qwen3-0.6B"
     function_definitions_file: str
     input_prompts_file: str
@@ -32,7 +57,12 @@ class FunctionCaller(BaseModel):
     _stop_tokens: list[np.int32 | np.int64] = []
     model_config = ConfigDict(extra='forbid')
 
-    def _llm_name_validation(self) -> None:
+    def _llm_initialization(self) -> None:
+    """Instantiates the Small_LLM_Model inside the FunctionCaller class
+
+    This Function Initializes the Small_LLM_Model and cashes the prompts
+    the FunctionCaller will use to translate prompts into function calls
+    """
         try:
             self._llm = Small_LLM_Model(model_name=self.model_name)
             p_name = ("<|im_start|>system\nYou are a function caller, respond"
@@ -157,7 +187,7 @@ class FunctionCaller(BaseModel):
         self._initialize_prompts()
         self._initialize_function_definitions()
         self._output_file_validation(self.output_file)
-        self._llm_name_validation()
+        self._llm_initialization()
         return self
 
     def _llm_pick_from_list(self, prompt: list[np.int32 | np.int64],
