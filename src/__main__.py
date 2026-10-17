@@ -1,36 +1,36 @@
 from llm_sdk import Small_LLM_Model
 from pydantic import BaseModel, ValidationError, model_validator
-from pydantic import validate_call, ConfigDict, PrivateAttr
-from typing import Any
+from pydantic import ConfigDict
 from os import makedirs
 from os.path import dirname
+from typing import Any
 import sys
 import json
 import numpy as np
 import re
 
+
 class FunctionCallerError(Exception):
     pass
+
 
 class FunctionCaller(BaseModel):
     model_name: str = "Qwen/Qwen3-0.6B"
     function_definitions_file: str
     input_prompts_file: str
     output_file: str
-    _llm: Small_LLM_Model
+    _llm: Small_LLM_Model = None
     _prompts: list[str] = []
-    _functions: list[dict[str, str | dict[str,str]]] = []
+    _functions: list[dict[str, str | dict[str, str]]] = []
     _function_names: list[str] = []
-    _fn_name_tokens: list[list[int]] = []
-    _function_params: dict[str, dict[str,str]] = {}
-    _name_prompt: list[int]
-    _prompt_end: list[int]
-    _param_prompt1: list[int]
-    _param_prompt2: list[int]
-    _stop_tokens: list[int]
-
+    _fn_name_tokens: list[list[np.int32 | np.int64]] = []
+    _function_params: dict[str, dict[str, dict[str, str]]] = {}
+    _name_prompt: list[np.int32 | np.int64] = []
+    _prompt_end: list[np.int32 | np.int64] = []
+    _param_prompt1: list[np.int32 | np.int64] = []
+    _param_prompt2: list[np.int32 | np.int64] = []
+    _stop_tokens: list[np.int32 | np.int64] = []
     model_config = ConfigDict(extra='forbid')
-    
 
     def _llm_name_validation(self) -> None:
         try:
@@ -39,7 +39,7 @@ class FunctionCaller(BaseModel):
                       "only with function name from these availabe functions:"
                       f"\n {self._functions}\n<|im_end|><|im_start|>user\n")
             p_end = (" /no_think<|im_end|>\n<|im_start|>assistant\n<think>\n"
-                      "\n</think>\n")
+                     "\n</think>\n")
             self._name_prompt = self._llm.encode(p_name).tolist()[0]
             self._prompt_end = self._llm.encode(p_end).tolist()[0]
             param_s = ("<|im_start|>system\nYou are a function caller, given"
@@ -55,7 +55,6 @@ class FunctionCaller(BaseModel):
         except OSError:
             "OSError has to be cought because llm_sdk devs were slacking"
             raise ValueError("Invalid model name")
-
 
     def _initialize_function_definitions(self) -> None:
         try:
@@ -74,13 +73,13 @@ class FunctionCaller(BaseModel):
                     try:
                         if not isinstance(fn["name"], str):
                             raise TypeError("function name is not a string: "
-                                            f"fn")
+                                            f"{fn["name"]}")
                         if not isinstance(fn["description"], str):
                             raise TypeError("Function description must be a "
-                                            f"string: {fn}")
+                                            f"string: {fn["description"]}")
                         if not isinstance(fn["parameters"], dict):
                             raise TypeError("Function parameters must be a "
-                                            f"dictionary: {fn}")
+                                            f"dictionary: {fn["parameters"]}")
                         for value in fn["parameters"].values():
                             print(value)
                             if not isinstance(value, dict):
@@ -111,7 +110,7 @@ class FunctionCaller(BaseModel):
                     self._function_params[fn["name"]] = fn["parameters"]
         except (FileNotFoundError, PermissionError, IsADirectoryError) as e:
             raise ValueError("Could not open function_definitions_file:"
-                                  f" {e}")
+                             f" {e}")
         except json.JSONDecodeError as e:
             raise ValueError(f"Invalid JSON in function_definitions_file {e}")
         except TypeError as e:
@@ -136,7 +135,7 @@ class FunctionCaller(BaseModel):
                     self._prompts.append(prompt_dict["prompt"])
         except (FileNotFoundError, PermissionError, IsADirectoryError) as e:
             raise ValueError("Could not open input_prompts_file:"
-                                  f" {e}")
+                             f" {e}")
         except json.JSONDecodeError as e:
             raise ValueError(f"Invalid JSON in input_prompts_file: {e}")
         except TypeError as e:
@@ -149,27 +148,28 @@ class FunctionCaller(BaseModel):
             makedirs(dirname(file), exist_ok=True)
             with open(file, "w") as f:
                 "file is openable in write mode"
+                f.name
         except (PermissionError, IsADirectoryError) as e:
-            raise ValueError("Could not open output_file:"
-                                  f" {e}")
+            raise ValueError(f"Could not open output_file: {e}")
 
     @model_validator(mode="after")
-    def valiate_model(self)-> "FunctionCaller":
+    def valiate_model(self) -> "FunctionCaller":
         self._initialize_prompts()
         self._initialize_function_definitions()
         self._output_file_validation(self.output_file)
         self._llm_name_validation()
         return self
 
-    def _llm_pick_from_list(self, prompt: list[int],
-                            selection: list[list[int]]) -> list[int]:
-        ret: list[int] = []
+    def _llm_pick_from_list(self, prompt: list[np.int32 | np.int64],
+                            selection: list[list[np.int32 | np.int64]]
+                            ) -> list[np.int32 | np.int64]:
+        ret: list[np.int32 | np.int64] = []
         while len(selection) > 1:
             for token in selection[1:]:
                 if token[0] != selection[0][0]:
                     print(ret)
                     logits = self._llm.get_logits_from_input_ids(prompt)
-                    allowed = [l[0] for l in selection]
+                    allowed = [li[0] for li in selection]
                     np_logits = np.array(logits)
                     for i in range(len(np_logits)):
                         if i not in allowed:
@@ -177,21 +177,24 @@ class FunctionCaller(BaseModel):
                     highest = np.argmax(np_logits)
                     ret.append(highest)
                     prompt.append(highest)
-                    selection = [l[1:] for l in selection
-                            if len(l) > 1 and l[0] == highest]
+                    selection = [li[1:] for li in selection
+                                 if len(li) > 1 and li[0] == highest]
+                    print(ret)
                     break
             else:
                 ret.append(selection[0][0])
                 prompt.append(selection[0][0])
-                selection = [l[1:] for l in selection if len(l)]
+                selection = [li[1:] for li in selection if len(li)]
         if len(selection):
             ret += selection[0]
+        print(ret)
         return (ret)
 
-    def _llm_constrainted_decode(self, prompt: list[int],
-                                 constaint: list[int]) -> list[int]:
-        ret = []
-        highest = 0
+    def _llm_constrainted_decode(self, prompt: list[np.int32 | np.int64],
+                                 constaint: list[np.int32 | np.int64]
+                                 ) -> list[np.int32 | np.int64]:
+        ret: list[np.int32 | np.int64] = []
+        highest = np.array([0])[0]
         while highest not in self._stop_tokens:
             logits = self._llm.get_logits_from_input_ids(prompt)
             np_logits = np.array(logits)
@@ -206,53 +209,50 @@ class FunctionCaller(BaseModel):
                 constaint.remove(highest)
         for _ in ret:
             prompt.pop()
-        ret = self._llm.decode(ret)
-        ret = ret.strip(" \'\"").rstrip("\'\"")
-        ret = self._llm.encode(ret).tolist()[0]
+        ret_s = self._llm.decode(ret)
+        ret_s = ret_s.strip(" \'\"").rstrip("\'\"")
+        ret = self._llm.encode(ret_s).tolist()[0]
         return ret
 
-    def _llm_decode(self, prompt: list[int]) -> list[int]:
-        ret = []
-        highest = 0
+    def _llm_decode(self, prompt: list[np.int32 | np.int64]
+                    ) -> list[np.int32 | np.int64]:
+        ret: list[np.int32 | np.int64] = []
+        highest = np.array([0])[0]
         while highest not in self._stop_tokens:
             logits = self._llm.get_logits_from_input_ids(prompt)
             np_logits = np.array(logits)
-            # for i in range(len(logits)):
-            #     if i not in prompt and i not in self._stop_tokens:
-            #         np_logits[i] = -np.inf
             highest = np.argmax(np_logits)
             if highest not in self._stop_tokens:
                 ret.append(highest)
                 prompt.append(highest)
-                # constaint.remove(highest)
                 print(self._llm.decode(highest))
         for _ in ret:
             prompt.pop()
-        ret = self._llm.decode(ret)
-        ret = ret.strip(" \'\"").rstrip("\'\"")
-        ret = self._llm.encode(ret).tolist()[0]
+        ret_s = self._llm.decode(ret)
+        ret_s = ret_s.strip(" \'\"").rstrip("\'\"")
+        ret = self._llm.encode(ret_s).tolist()[0]
         return ret
-
 
     def _get_fn_name(self, prompt: str) -> str:
         prompt_tokens = self._llm.encode(prompt).tolist()[0]
         full_prompt = (self._name_prompt + prompt_tokens +
                        self._prompt_end)
         print(prompt)
-        names: list[list[int]] = self._fn_name_tokens.copy()
+        names: list[list[np.int32 | np.int64]] = self._fn_name_tokens.copy()
         pick = self._llm_pick_from_list(full_prompt, names)
-        return (self._llm.decode(pick))
+        ret: str = self._llm.decode(pick)
+        return (ret)
 
     def _get_fn_params(self, prompt: str, name: str) -> dict[str, str]:
         ret = {}
         func_str = f"{name}:{self._function_params[name]}"
         func_tokens = self._llm.encode(func_str).tolist()[0]
         prompt_tokens = self._llm.encode(prompt).tolist()[0]
-        full_prompt = (self._param_prompt1 + func_tokens + 
+        full_prompt = (self._param_prompt1 + func_tokens +
                        self._param_prompt2 + prompt_tokens +
                        self._prompt_end)
         s_numbers = re.findall(r'-?\d*\.?\d+', prompt)
-        numbers: list[list[int]] = []
+        numbers: list[list[np.int32 | np.int64]] = []
         for nb in s_numbers:
             numbers.append(self._llm.encode(nb).tolist()[0])
         print(numbers)
@@ -306,18 +306,17 @@ class FunctionCaller(BaseModel):
         print(self._llm.decode(full_prompt))
         return ret
 
-
     def call_functions(self) -> bool:
         ret = []
         try:
             for prompt in self._prompts:
-                call = {
-                    "prompt" : prompt,
+                call: dict[str, Any] = {
+                    "prompt": prompt,
                     "name": self._get_fn_name(prompt)
                 }
                 if "regex" in self._function_params[call["name"]]:
                     call["parameters"] = self._get_regex_params(prompt,
-                                                               call["name"])
+                                                                call["name"])
                 else:
                     call["parameters"] = self._get_fn_params(prompt,
                                                              call["name"])
@@ -332,9 +331,9 @@ class FunctionCaller(BaseModel):
 
 if __name__ == "__main__":
     args = sys.argv[1:]
-    func_file="data/input/functions_definition.json"
-    input_file="data/input/function_calling_tests.json"
-    out_file="data/output/function_calling_results.json"
+    func_file = "data/input/functions_definition.json"
+    input_file = "data/input/function_calling_tests.json"
+    out_file = "data/output/function_calling_results.json"
     try:
         while args:
             match args[0]:
@@ -383,46 +382,3 @@ if __name__ == "__main__":
             except KeyError:
                 error = errordict["msg"]
             print(error)
-    #     with open("data/input/function_calling_tests.json", "r") as f:
-    #         data: list[dict[str, str]] = json.load(f)
-    #         print(data)
-    #         llm = Small_LLM_Model()
-    #         stop_token: int = llm.encode("<|im_end|>").tolist()[0][0]
-    #         for entry in data:
-    #             print(entry["prompt"], end="\n\n")
-    #             tokens: list[int] = llm.encode("<|im_start|>system\n"
-    #                                            "Keep response short\n"
-    #                                            "<|im_start|>user\n"
-    #                                            f"{entry['prompt']}"
-    #                                            " /no_think<|im_end|>"
-    #                                            "\n<|im_start|>assistant\n"
-    #                                            "<think>\n\n</think>\n"
-    #                                            ).tolist()[0]
-    #             highest = 0
-    #             while highest != stop_token:
-    #                 logits = llm.get_logits_from_input_ids(tokens)
-    #                 np_logits = np.array(logits)
-    #                 highest = np.argmax(np_logits)
-    #                 print(llm.decode([highest]))
-    #                 tokens.append(highest)
-    #             print(llm.decode(tokens), "\n\n")
-    #
-    #
-    #
-    # except (FileNotFoundError, IsADirectoryError, PermissionError) as e:
-    #     print(f"Cannot open file: {e}")
-    # llm = Small_LLM_Model()
-    # print("here")
-    # tokens: list[int] = llm.encode('Hey it\'s me it\'s Verity... ASK ME').tolist()[0]
-    # print("here")
-    # for _ in range(60):
-    #     logits = llm.get_logits_from_input_ids(tokens)
-    #     logits = logits
-    #     sorted = logits.copy()
-    #     sorted.sort()
-    #     highest = logits.index(sorted[-1])
-    #     print(highest)
-    #     print(llm.decode([highest]))
-    #     tokens.append(highest)
-    # print(llm.decode(tokens))
-
