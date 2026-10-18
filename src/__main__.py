@@ -13,9 +13,9 @@ import re
 class FunctionCallerError(Exception):
     """Shows errors thrown by the FunctionCaller class
 
-    When the FunctionCaller class runs into an Exception, that exception
-    gets cought and the FunctionCaller raises a FunctionCallerError with the
-    approriate error message.
+    When the FunctionCaller class runs into an Exception during execution,
+    that exception gets cought and the FunctionCaller raises a 
+    FunctionCallerError with the approriate error message.
 
     Attributes:
         obj: The object to be cought using try/except (often a message)
@@ -37,7 +37,7 @@ class FunctionCaller(BaseModel):
         input_prompts_file: The file to read natural language requests from
         output_file: The file to write the function calls to in JSON format
     Raises:
-        ValidationError: If during instantiation a configuration error is made
+        ValidationError: If during instantiation the configuration is wrong
         FunctionCallerError: if during translation an exception occurs
     """
     model_name: str = "Qwen/Qwen3-0.6B"
@@ -58,11 +58,15 @@ class FunctionCaller(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
     def _llm_initialization(self) -> None:
-    """Instantiates the Small_LLM_Model inside the FunctionCaller class
+        """Instantiates the Small_LLM_Model inside the FunctionCaller class
 
-    This Function Initializes the Small_LLM_Model and cashes the prompts
-    the FunctionCaller will use to translate prompts into function calls
-    """
+        This method initializes the Small_LLM_Model and caches the prompts
+        the FunctionCaller will use to translate prompts into function calls
+        It is not meant to be used outside the class.
+
+        Raises:
+            ValueError: if the llm model name isn't found on huggingface
+        """
         try:
             self._llm = Small_LLM_Model(model_name=self.model_name)
             p_name = ("<|im_start|>system\nYou are a function caller, respond"
@@ -87,6 +91,16 @@ class FunctionCaller(BaseModel):
             raise ValueError("Invalid model name")
 
     def _initialize_function_definitions(self) -> None:
+        """Parses the function definitons file and catches definition errors
+
+        This method opens the function definitions file and tries to
+        translate it from JSON to a python object using the json library.
+        Then checks that python object for correct formatting.
+        It is not meant to be used outside the class.
+
+        Raises:
+            ValueError: if an invalid configuration is detected
+        """
         try:
             with open(self.function_definitions_file, "r") as f:
                 data = json.load(f)
@@ -148,6 +162,16 @@ class FunctionCaller(BaseModel):
                              f"function_definitions_file: {e}")
 
     def _initialize_prompts(self) -> None:
+        """Parses the prompts file and catches definition errors
+        
+        This method opens the function prompts file and checks if it
+        constains correctly formatted prompts, which are then added to a
+        big list of prompts.
+        It is not meant to be used outside the class.
+
+        Raises:
+            ValueError: If an invalid configuration is detected
+        """
         try:
             with open(self.input_prompts_file, "r") as f:
                 data = json.load(f)
@@ -174,6 +198,16 @@ class FunctionCaller(BaseModel):
 
     @staticmethod
     def _output_file_validation(file: str) -> None:
+        """Opens the output file to check if it can write into it
+
+        This method tries to make the paths to the output file then tries
+        to open the output file, if an error occurs the filename is deemed a
+        configuration error an a ValueError is raised.
+        It is not Meant to be used outside the class.
+
+        Raises:
+            ValueError: of the file couldn't be written into.
+        """
         try:
             makedirs(dirname(file), exist_ok=True)
             with open(file, "w") as f:
@@ -184,6 +218,20 @@ class FunctionCaller(BaseModel):
 
     @model_validator(mode="after")
     def valiate_model(self) -> "FunctionCaller":
+        """Validates the configuration of the FunctionCaller
+
+        This method uses pydantic for base type checking. Then the aditional
+        above initialization and validation methods. When an error from those
+        methods is raised pydantic catches it and wraps in inside a
+        ValidationError.
+        This method is meant to only be called by pydantic on initialization
+
+        Returns:
+            self: A FunctionCaller object
+        
+        Raises:
+            ValidationError: if configuration is invalid or an error occurs
+        """
         self._initialize_prompts()
         self._initialize_function_definitions()
         self._output_file_validation(self.output_file)
