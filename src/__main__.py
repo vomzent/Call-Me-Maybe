@@ -241,6 +241,23 @@ class FunctionCaller(BaseModel):
     def _llm_pick_from_list(self, prompt: list[np.int32 | np.int64],
                             selection: list[list[np.int32 | np.int64]]
                             ) -> list[np.int32 | np.int64]:
+        """Picks one of the token lists in selection using the LLM
+
+        This method takes in the full token history (prompt) and uses the LLM
+        together with constraint decoding and preselection to pick one of the
+        token lists inside selection. For example given the tokens for
+        [[fn,_add,_numbers],[fn,_add,_strings]] the method will preselect the
+        tokens fn and _add then use the llm to pick an option where nothing
+        can be preselected.
+        This method is meant to only be used inside the class.
+
+        Args:
+            prompt: The full token history (prompt) as context for the LLM
+            selection: A list of token lists the LLM will choose from
+
+        Returns:
+            List[int]: A list of the tokens selected
+        """
         ret: list[np.int32 | np.int64] = []
         while len(selection) > 1:
             for token in selection[1:]:
@@ -271,6 +288,21 @@ class FunctionCaller(BaseModel):
     def _llm_constrainted_decode(self, prompt: list[np.int32 | np.int64],
                                  constaint: list[np.int32 | np.int64]
                                  ) -> list[np.int32 | np.int64]:
+        """Picks tokens from constraint using the LLM
+
+        This method takes in the full token history (prompt) and a list of
+        constraint tokens. Then makes the LLM pick tokens only part
+        of the constraint tokens list. returning when there are no tokens left
+        or when the LLM picks a stop token.
+        This method is meant to only be used inside the class.
+
+        Args:
+            prompt: The full token history (prompt) as context for the LLM
+            constraint: A list of tokens the AI is constrainted to choose
+
+        Returns:
+            List[int]: A list of tokens selected by the LLM
+        """
         ret: list[np.int32 | np.int64] = []
         highest = np.array([0])[0]
         while highest not in self._stop_tokens:
@@ -294,6 +326,19 @@ class FunctionCaller(BaseModel):
 
     def _llm_decode(self, prompt: list[np.int32 | np.int64]
                     ) -> list[np.int32 | np.int64]:
+        """Picks tokens using the LLM
+
+        This method takes in the full token history (prompt) and uses the LLM
+        to pick the next most probable tokens until the LLM picks a stop
+        token. Returning a list of tokens picked.
+        This method is only meant to be used inside the class.
+
+        Args:
+            prompt: The full token history (prompt) as context for the LLM
+
+        Returns:
+            List[int]: A list of tokens selected by the LLM
+        """
         ret: list[np.int32 | np.int64] = []
         highest = np.array([0])[0]
         while highest not in self._stop_tokens:
@@ -312,6 +357,18 @@ class FunctionCaller(BaseModel):
         return ret
 
     def _get_fn_name(self, prompt: str) -> str:
+        """Picks a function name given a user's prequest
+
+        This method takes a natural language request as string then picks the
+        most likely function to resolve the user's prompt.
+        This method is only meant to be used inside the class.
+
+        Args:
+            prompt: The natural language request to pick a function name from
+
+        Returns:
+            str: The function name picked as a string
+        """
         prompt_tokens = self._llm.encode(prompt).tolist()[0]
         full_prompt = (self._name_prompt + prompt_tokens +
                        self._prompt_end)
@@ -322,6 +379,19 @@ class FunctionCaller(BaseModel):
         return (ret)
 
     def _get_fn_params(self, prompt: str, name: str) -> dict[str, str]:
+        """Picks function parameters given a user's request and function name
+
+        This method takes a natural language request and the name of the
+        function. Then picks parameters using constraint decoding and the LLM.
+        This method is only meant to be used inside the class
+
+        Args:
+            prompt: The natural language request as context for the LLM
+            name: The name of the function chosen
+
+        Returns:
+            dict[str, str]: Dictionary containing the parameter and value pair
+        """
         ret = {}
         func_str = f"{name}:{self._function_params[name]}"
         func_tokens = self._llm.encode(func_str).tolist()[0]
@@ -343,9 +413,16 @@ class FunctionCaller(BaseModel):
                 nbs = numbers.copy()
                 ai_prompt = self._llm_pick_from_list(full_prompt, nbs)
                 numbers.remove(ai_prompt)
+            elif k == "regex":
+                full_prompt += self._llm.encode("r'").tolist()[0]
+                ai_prompt = self._llm_decode(full_prompt)
             else:
                 ai_prompt = self._llm_constrainted_decode(full_prompt,
                                                           prompt_tokens)
+            ai_string = self._llm.decode(ai_prompt)
+            if ai_string.find(",") != -1:
+                ai_string = ai_string[:ai_string.find(",")]
+                ai_prompt = self._llm.encode(ai_string).tolist()[0]
             full_prompt += ai_prompt
             ai_string = self._llm.decode(ai_prompt)
             full_prompt += self._llm.encode(",\n").tolist()[0]
@@ -354,6 +431,8 @@ class FunctionCaller(BaseModel):
         return ret
 
     def _get_regex_params(self, prompt: str, name: str) -> dict[str, str]:
+        """To be removed
+        """
         ret = {}
         func_str = f"{name}:{self._function_params[name]}"
         func_tokens = self._llm.encode(func_str).tolist()[0]
@@ -365,10 +444,7 @@ class FunctionCaller(BaseModel):
             ai_prompt = []
             start = self._llm.encode(f"{key}: ").tolist()[0]
             full_prompt += start
-            if key == "source_string":
-                ai_prompt = self._llm_constrainted_decode(full_prompt,
-                                                          prompt_tokens)
-            elif key == "regex":
+            if key == "regex":
                 full_prompt += self._llm.encode("r'").tolist()[0]
                 ai_prompt = self._llm_decode(full_prompt)
             else:
@@ -385,6 +461,19 @@ class FunctionCaller(BaseModel):
         return ret
 
     def call_functions(self) -> bool:
+        """Generates precise function calls from natural language requests
+
+        This method takes in the configuration given on initialization and
+        for each natural language request translates it into a function call
+        using the function definitons. Then writes tose translations to a JSON
+        file.
+
+        Returns:
+            bool: Always True unless an exception is raised
+
+        Raises:
+            FunctionCallerError: When an Exception occurs during translation
+        """
         ret = []
         try:
             for prompt in self._prompts:
@@ -392,18 +481,14 @@ class FunctionCaller(BaseModel):
                     "prompt": prompt,
                     "name": self._get_fn_name(prompt)
                 }
-                if "regex" in self._function_params[call["name"]]:
-                    call["parameters"] = self._get_regex_params(prompt,
-                                                                call["name"])
-                else:
-                    call["parameters"] = self._get_fn_params(prompt,
-                                                             call["name"])
+                call["parameters"] = self._get_fn_params(prompt,
+                                                         call["name"])
                 ret.append(call)
                 print(call["parameters"])
             with open(self.output_file, "w") as f:
                 _ = f.write(json.dumps(ret, indent=4))
             return True
-        except IsADirectoryError as e:
+        except Exception as e:
             raise FunctionCallerError(e)
 
 
