@@ -1,20 +1,33 @@
-from llm_sdk import Small_LLM_Model
-from pydantic import BaseModel, ValidationError, model_validator
-from pydantic import ConfigDict
-from os import makedirs
-from os.path import dirname
-from typing import Any
-import sys
-import json
-import numpy as np
-import re
+try:
+    from pydantic import BaseModel, ValidationError, model_validator
+    from pydantic import ConfigDict
+    from os import makedirs
+    from os.path import dirname
+    from typing import Any
+    import sys
+    import json
+    import numpy as np
+    import re
+    import importlib
+except ModuleNotFoundError as e:
+    print(f"{e} Please make sure you run the project using uv")
+    exit(-1)
+
+try:
+    llm_sdk: Any = importlib.import_module("llm_sdk")
+except ImportError as e:
+    print(f"{e} Please make sure the sdk is inside the project folder")
+    exit(-1)
+except KeyboardInterrupt:
+    print("I can't make this part go any quicker")
+    exit(-1)
 
 
 class FunctionCallerError(Exception):
     """Shows errors thrown by the FunctionCaller class
 
     When the FunctionCaller class runs into an Exception during execution,
-    that exception gets cought and the FunctionCaller raises a 
+    that exception gets cought and the FunctionCaller raises a
     FunctionCallerError with the approriate error message.
 
     Attributes:
@@ -26,11 +39,11 @@ class FunctionCallerError(Exception):
 class FunctionCaller(BaseModel):
     """Translates natural language requests into function calls
 
-    The FunctionCaller class takes in a Casual Language Model a function 
+    The FunctionCaller class takes in a Casual Language Model a function
     definitions file, input prompts file and an output file. Then Translates
     each prompt into a function call that gets written to the output file in
     JSON format.
-    
+
     Attributes:
         model_name: The name of the Language Model (has to support ChatML)
         function_definitions_file: The file to read function definitons from
@@ -44,7 +57,7 @@ class FunctionCaller(BaseModel):
     function_definitions_file: str
     input_prompts_file: str
     output_file: str
-    _llm: Small_LLM_Model = None
+    _llm: llm_sdk.Small_LLM_Model = None
     _prompts: list[str] = []
     _functions: list[dict[str, str | dict[str, str]]] = []
     _function_names: list[str] = []
@@ -68,7 +81,7 @@ class FunctionCaller(BaseModel):
             ValueError: if the llm model name isn't found on huggingface
         """
         try:
-            self._llm = Small_LLM_Model(model_name=self.model_name)
+            self._llm = llm_sdk.Small_LLM_Model(model_name=self.model_name)
             p_name = ("<|im_start|>system\nYou are a function caller, respond"
                       "only with function name from these availabe functions:"
                       f"\n {self._functions}\n<|im_end|><|im_start|>user\n")
@@ -163,7 +176,7 @@ class FunctionCaller(BaseModel):
 
     def _initialize_prompts(self) -> None:
         """Parses the prompts file and catches definition errors
-        
+
         This method opens the function prompts file and checks if it
         constains correctly formatted prompts, which are then added to a
         big list of prompts.
@@ -228,7 +241,7 @@ class FunctionCaller(BaseModel):
 
         Returns:
             self: A FunctionCaller object
-        
+
         Raises:
             ValidationError: if configuration is invalid or an error occurs
         """
@@ -545,3 +558,5 @@ if __name__ == "__main__":
             except KeyError:
                 error = errordict["msg"]
             print(error)
+    except KeyboardInterrupt:
+        print("Stopping i guess >:(")
