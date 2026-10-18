@@ -138,7 +138,6 @@ class FunctionCaller(BaseModel):
                             raise TypeError("Function parameters must be a "
                                             f"dictionary: {fn["parameters"]}")
                         for value in fn["parameters"].values():
-                            print(value)
                             if not isinstance(value, dict):
                                 raise TypeError("Parameters must have a dict "
                                                 "containing type: "
@@ -275,7 +274,6 @@ class FunctionCaller(BaseModel):
         while len(selection) > 1:
             for token in selection[1:]:
                 if token[0] != selection[0][0]:
-                    print(ret)
                     logits = self._llm.get_logits_from_input_ids(prompt)
                     allowed = [li[0] for li in selection]
                     np_logits = np.array(logits)
@@ -287,15 +285,16 @@ class FunctionCaller(BaseModel):
                     prompt.append(highest)
                     selection = [li[1:] for li in selection
                                  if len(li) > 1 and li[0] == highest]
-                    print(ret)
+                    print(f"LLM has picked: {self._llm.decode(highest)}")
                     break
             else:
                 ret.append(selection[0][0])
                 prompt.append(selection[0][0])
+                print(f"Preselected token: {self._llm.decode(ret[-1])}")
                 selection = [li[1:] for li in selection if len(li)]
         if len(selection):
             ret += selection[0]
-        print(ret)
+        print(f"Pick from list picked: {self._llm.decode(ret)}")
         return (ret)
 
     def _llm_constrainted_decode(self, prompt: list[np.int32 | np.int64],
@@ -325,8 +324,9 @@ class FunctionCaller(BaseModel):
                 if i not in constaint and i not in self._stop_tokens:
                     np_logits[i] = -np.inf
             highest = np.argmax(np_logits)
+            print("Constrainted LLM has generated: "
+                  f"{self._llm.decode(highest)}")
             if highest not in self._stop_tokens:
-                print(self._llm.decode(highest))
                 ret.append(highest)
                 prompt.append(highest)
                 constaint.remove(highest)
@@ -335,6 +335,7 @@ class FunctionCaller(BaseModel):
         ret_s = self._llm.decode(ret)
         ret_s = ret_s.strip(" \'\"").rstrip("\'\"")
         ret = self._llm.encode(ret_s).tolist()[0]
+        print(f"Constrainted decode returns: {self._llm.decode(ret)}")
         return ret
 
     def _llm_decode(self, prompt: list[np.int32 | np.int64]
@@ -361,10 +362,12 @@ class FunctionCaller(BaseModel):
             if highest not in self._stop_tokens:
                 ret.append(highest)
                 prompt.append(highest)
-                print(self._llm.decode(highest))
+                print(f"LLM has generated: {self._llm.decode(highest)}")
         for _ in ret:
             prompt.pop()
         ret_s = self._llm.decode(ret)
+        if ret_s.find(",") != -1:
+            ret_s = ret_s[:ret_s.find(",")]
         ret_s = ret_s.strip(" \'\"").rstrip("\'\"")
         ret = self._llm.encode(ret_s).tolist()[0]
         return ret
@@ -385,7 +388,6 @@ class FunctionCaller(BaseModel):
         prompt_tokens = self._llm.encode(prompt).tolist()[0]
         full_prompt = (self._name_prompt + prompt_tokens +
                        self._prompt_end)
-        print(prompt)
         names: list[list[np.int32 | np.int64]] = self._fn_name_tokens.copy()
         pick = self._llm_pick_from_list(full_prompt, names)
         ret: str = self._llm.decode(pick)
@@ -416,7 +418,6 @@ class FunctionCaller(BaseModel):
         numbers: list[list[np.int32 | np.int64]] = []
         for nb in s_numbers:
             numbers.append(self._llm.encode(nb).tolist()[0])
-        print(numbers)
         print(self._llm.decode(prompt_tokens))
         for k, v in self._function_params[name].items():
             ai_prompt = []
@@ -432,44 +433,10 @@ class FunctionCaller(BaseModel):
             else:
                 ai_prompt = self._llm_constrainted_decode(full_prompt,
                                                           prompt_tokens)
-            ai_string = self._llm.decode(ai_prompt)
-            if ai_string.find(",") != -1:
-                ai_string = ai_string[:ai_string.find(",")]
-                ai_prompt = self._llm.encode(ai_string).tolist()[0]
             full_prompt += ai_prompt
             ai_string = self._llm.decode(ai_prompt)
             full_prompt += self._llm.encode(",\n").tolist()[0]
             ret[k] = ai_string
-        print(self._llm.decode(full_prompt))
-        return ret
-
-    def _get_regex_params(self, prompt: str, name: str) -> dict[str, str]:
-        """To be removed
-        """
-        ret = {}
-        func_str = f"{name}:{self._function_params[name]}"
-        func_tokens = self._llm.encode(func_str).tolist()[0]
-        prompt_tokens = self._llm.encode(prompt).tolist()[0]
-        full_prompt = (self._param_prompt1 + func_tokens +
-                       self._param_prompt2 + prompt_tokens +
-                       self._prompt_end)
-        for key in self._function_params[name].keys():
-            ai_prompt = []
-            start = self._llm.encode(f"{key}: ").tolist()[0]
-            full_prompt += start
-            if key == "regex":
-                full_prompt += self._llm.encode("r'").tolist()[0]
-                ai_prompt = self._llm_decode(full_prompt)
-            else:
-                ai_prompt = self._llm_constrainted_decode(full_prompt,
-                                                          prompt_tokens)
-            ai_string = self._llm.decode(ai_prompt)
-            if ai_string.find(",") != -1:
-                ai_string = ai_string[:ai_string.find(",")]
-                ai_prompt = self._llm.encode(ai_string).tolist()[0]
-            full_prompt += ai_prompt
-            full_prompt += self._llm.encode(",\n").tolist()[0]
-            ret[key] = ai_string
         print(self._llm.decode(full_prompt))
         return ret
 
@@ -490,6 +457,7 @@ class FunctionCaller(BaseModel):
         ret = []
         try:
             for prompt in self._prompts:
+                print(f"\n\n\nPrompt: {prompt}")
                 call: dict[str, Any] = {
                     "prompt": prompt,
                     "name": self._get_fn_name(prompt)
@@ -543,6 +511,7 @@ if __name__ == "__main__":
         exit(-1)
 
     try:
+        print("All loaded up!")
         caller = FunctionCaller(function_definitions_file=func_file,
                                 input_prompts_file=input_file,
                                 output_file=out_file)
