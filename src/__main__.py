@@ -349,7 +349,7 @@ class FunctionCaller(BaseModel):
         return ret
 
     def _llm_unconstrainted_decode(self, prompt: list[np.int32 | np.int64]
-                    ) -> list[np.int32 | np.int64]:
+                                   ) -> list[np.int32 | np.int64]:
         """Picks tokens using the LLM
 
         This method takes in the full token history (prompt) and uses the LLM
