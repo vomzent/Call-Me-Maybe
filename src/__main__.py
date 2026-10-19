@@ -425,6 +425,8 @@ class FunctionCaller(BaseModel):
         full_prompt = (self._param_prompt1 + func_tokens +
                        self._param_prompt2 + prompt_tokens +
                        self._prompt_end)
+        for word in prompt.split(" "):
+            prompt_tokens += self._llm.encode(word).tolist()[0]
         s_numbers = re.findall(r'-?\d*\.?\d+', prompt)
         numbers: list[list[np.int32 | np.int64]] = []
         for nb in s_numbers:
@@ -432,10 +434,11 @@ class FunctionCaller(BaseModel):
         print(self._llm.decode(prompt_tokens))
         for k, v in self._function_params[name].items():
             ai_prompt = []
-            start = self._llm.encode(f"{k}: ").tolist()[0]
+            start = self._llm.encode(f"{k}:").tolist()[0]
             full_prompt += start
-            if v["type"] == "number":
+            if v["type"] == "number" or v["type"] == "integer":
                 nbs = numbers.copy()
+                full_prompt += self._llm.encode(" ").tolist()[0]
                 if len(nbs):
                     ai_prompt = self._llm_pick_from_list(full_prompt, nbs)
                     numbers.remove(ai_prompt)
@@ -448,15 +451,19 @@ class FunctionCaller(BaseModel):
                     except ValueError:
                         ai_prompt = self._llm.encode("0").tolist()[0]
             elif k == "regex":
-                full_prompt += self._llm.encode("r'").tolist()[0]
+                full_prompt += self._llm.encode(" r'").tolist()[0]
+                ai_prompt = self._llm_unconstrainted_decode(full_prompt)
+            elif k == "replacement":
+                full_prompt += self._llm.encode(" '").tolist()[0]
                 ai_prompt = self._llm_unconstrainted_decode(full_prompt)
             else:
+                full_prompt += self._llm.encode(" '").tolist()[0]
                 ai_prompt = self._llm_constrainted_decode(full_prompt,
                                                           prompt_tokens)
             full_prompt += ai_prompt
             param_value = self._llm.decode(ai_prompt)
             try:
-                param_value = int(param_value)
+                param_value = float(param_value)
             except ValueError:
                 pass
             full_prompt += self._llm.encode(",\n").tolist()[0]
