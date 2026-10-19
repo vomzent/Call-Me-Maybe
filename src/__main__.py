@@ -19,7 +19,7 @@ except ImportError as e:
     print(f"{e} Please make sure the sdk is inside the project folder")
     exit(-1)
 except KeyboardInterrupt:
-    print("I can't make this part go any quicker")
+    print("\nI can't make this part go any quicker sorry :(")
     exit(-1)
 
 
@@ -128,12 +128,17 @@ class FunctionCaller(BaseModel):
                                         " description, parameters "
                                         f"and returns: {fn}")
                     try:
-                        if not isinstance(fn["name"], str):
+                        if not isinstance(fn["name"], str) or (
+                                fn["name"] == ''):
                             raise TypeError("function name is not a string: "
-                                            f"{fn["name"]}")
-                        if not isinstance(fn["description"], str):
+                                            f"{fn}")
+                        if fn["name"] in self._function_names:
+                            raise TypeError("function name is a duplicate:"
+                                            f" {fn["name"]}")
+                        if not isinstance(fn["description"], str) or (
+                                fn["description"] == ''):
                             raise TypeError("Function description must be a "
-                                            f"string: {fn["description"]}")
+                                            f"string: {fn}")
                         if not isinstance(fn["parameters"], dict):
                             raise TypeError("Function parameters must be a "
                                             f"dictionary: {fn["parameters"]}")
@@ -146,7 +151,8 @@ class FunctionCaller(BaseModel):
                                 raise TypeError("Parameters dictionary must "
                                                 "only contain type: "
                                                 f"{fn["parameters"]}")
-                            if not isinstance(value["type"], str):
+                            if not isinstance(value["type"], str) or (
+                                    value["type"] == ''):
                                 raise TypeError("Parameters type must be"
                                                 "in string format: "
                                                 f"{fn['parameters']}")
@@ -155,8 +161,9 @@ class FunctionCaller(BaseModel):
                                             f"containing type: {fn}")
                         if len(fn["returns"]) != 1:
                             TypeError("returns dictionary must only contain "
-                                      f"type {fn['returns']}")
-                        if not isinstance(fn["returns"]["type"], str):
+                                      f"type: {fn}")
+                        if not isinstance(fn["returns"]["type"], str) or (
+                                fn["returns"]["type"] == ''):
                             raise TypeError("returns type must be in string "
                                             f"format {fn['returns']}")
                     except KeyError as e:
@@ -197,7 +204,7 @@ class FunctionCaller(BaseModel):
                                   if k != "prompt" or not isinstance(v, str)]
                     if len(wrong_vals):
                         raise ValueError("Invalid values inside "
-                                         f"input_prompts_file: {wrong_vals}")
+                                         f"input_prompts_file: {prompt_dict}")
                     self._prompts.append(prompt_dict["prompt"])
         except (FileNotFoundError, PermissionError, IsADirectoryError) as e:
             raise ValueError("Could not open input_prompts_file:"
@@ -271,6 +278,7 @@ class FunctionCaller(BaseModel):
             List[int]: A list of the tokens selected
         """
         ret: list[np.int32 | np.int64] = []
+        selection = [li for li in selection if len(li)]
         while len(selection) > 1:
             for token in selection[1:]:
                 if token[0] != selection[0][0]:
@@ -291,7 +299,9 @@ class FunctionCaller(BaseModel):
                 ret.append(selection[0][0])
                 prompt.append(selection[0][0])
                 print(f"Preselected token: {self._llm.decode(ret[-1])}")
-                selection = [li[1:] for li in selection if len(li)]
+                selection = [li[1:] for li in selection if len(li) > 1]
+        for _ in ret:
+            prompt.pop()
         if len(selection):
             ret += selection[0]
         print(f"Pick from list picked: {self._llm.decode(ret)}")
@@ -329,7 +339,7 @@ class FunctionCaller(BaseModel):
             if highest not in self._stop_tokens:
                 ret.append(highest)
                 prompt.append(highest)
-                constaint.remove(highest)
+                # constaint.remove(highest)
         for _ in ret:
             prompt.pop()
         ret_s = self._llm.decode(ret)
@@ -338,7 +348,7 @@ class FunctionCaller(BaseModel):
         print(f"Constrainted decode returns: {self._llm.decode(ret)}")
         return ret
 
-    def _llm_decode(self, prompt: list[np.int32 | np.int64]
+    def _llm_unconstrainted_decode(self, prompt: list[np.int32 | np.int64]
                     ) -> list[np.int32 | np.int64]:
         """Picks tokens using the LLM
 
@@ -369,6 +379,7 @@ class FunctionCaller(BaseModel):
         if ret_s.find(",") != -1:
             ret_s = ret_s[:ret_s.find(",")]
         ret_s = ret_s.strip(" \'\"").rstrip("\'\"")
+        print(f"decode returns {ret_s}")
         ret = self._llm.encode(ret_s).tolist()[0]
         return ret
 
@@ -393,7 +404,7 @@ class FunctionCaller(BaseModel):
         ret: str = self._llm.decode(pick)
         return (ret)
 
-    def _get_fn_params(self, prompt: str, name: str) -> dict[str, str]:
+    def _get_fn_params(self, prompt: str, name: str) -> dict[str, Any]:
         """Picks function parameters given a user's request and function name
 
         This method takes a natural language request and the name of the
@@ -425,18 +436,31 @@ class FunctionCaller(BaseModel):
             full_prompt += start
             if v["type"] == "number":
                 nbs = numbers.copy()
-                ai_prompt = self._llm_pick_from_list(full_prompt, nbs)
-                numbers.remove(ai_prompt)
+                if len(nbs):
+                    ai_prompt = self._llm_pick_from_list(full_prompt, nbs)
+                    numbers.remove(ai_prompt)
+                else:
+                    ai_prompt = self._llm_unconstrainted_decode(full_prompt)
+                    ai_string = self._llm.decode(ai_prompt)
+                    try:
+                        ai_num = int(ai_string)
+                        ai_prompt = self._llm.encode(str(ai_num)).tolist()[0]
+                    except ValueError:
+                        ai_prompt = self._llm.encode("0").tolist()[0]
             elif k == "regex":
                 full_prompt += self._llm.encode("r'").tolist()[0]
-                ai_prompt = self._llm_decode(full_prompt)
+                ai_prompt = self._llm_unconstrainted_decode(full_prompt)
             else:
                 ai_prompt = self._llm_constrainted_decode(full_prompt,
                                                           prompt_tokens)
             full_prompt += ai_prompt
-            ai_string = self._llm.decode(ai_prompt)
+            param_value = self._llm.decode(ai_prompt)
+            try:
+                param_value = int(param_value)
+            except ValueError:
+                pass
             full_prompt += self._llm.encode(",\n").tolist()[0]
-            ret[k] = ai_string
+            ret[k] = param_value
         print(self._llm.decode(full_prompt))
         return ret
 
@@ -528,4 +552,4 @@ if __name__ == "__main__":
                 error = errordict["msg"]
             print(error)
     except KeyboardInterrupt:
-        print("Stopping i guess >:(")
+        print("\nStopping i guess >:(")
